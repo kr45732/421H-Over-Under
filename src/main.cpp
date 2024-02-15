@@ -1,35 +1,50 @@
 /*----------------------------------------------------------------------------*/
-/*                                                                            */
 /*    Module:       main.cpp                                                  */
 /*    Author:       krish                                                     */
 /*    Created:      2/1/2024, 5:31:03 PM                                      */
-/*    Description:  V5 project                                                */
-/*                                                                            */
+/*    Description:  421H Over Under Code                                      */
 /*----------------------------------------------------------------------------*/
 
 #include "vex.h"
 
 using namespace vex;
 
-// A global instance of competition
+// Global instances
 competition Competition;
-
-// define your global instances of motors and other devices here
 controller Controller = controller(primary);
+brain Brain = brain();
 
+// Drive motors
 motor FrontLeft = motor(PORT8, ratio6_1, true);
 motor BackLeft = motor(PORT3, ratio6_1, true);
 motor_group LeftDrive = motor_group(FrontLeft, BackLeft);
-
 motor FrontRight = motor(PORT4, ratio6_1, false);
 motor BackRight = motor(PORT1, ratio6_1, false);
 motor_group RightDrive = motor_group(FrontRight, BackRight);
 
+// Other motors
 motor Flywheel = motor(PORT9, ratio6_1, false);
+motor Intake = motor(PORT6, ratio6_1, false);
+motor Arm = motor(PORT5, ratio36_1, false);
+
+// Pneumatics
+pneumatics LeftPneumatics = pneumatics(Brain.ThreeWirePort.F);
+pneumatics RightPneumatics = pneumatics(Brain.ThreeWirePort.E);
+
+// Sensors
+inertial InertialSensor = inertial(PORT2);  // check port
+
+// Function prototypes
+void rotateTo(double degrees, double speed, int differenceThreshold = 20);
+void move(int degrees, int degreesPerSecond, bool hold = true);
+void chassis();
+void togglePneumatics();
+
+// Global variables
+bool pneumaticsOpen = false;
 
 /*---------------------------------------------------------------------------*/
 /*                          Pre-Autonomous Functions                         */
-/*                                                                           */
 /*  You may want to perform some actions before the competition starts.      */
 /*  Do them in the following function.  You must return from this function   */
 /*  or the autonomous and usercontrol tasks will not be started.  This       */
@@ -38,59 +53,187 @@ motor Flywheel = motor(PORT9, ratio6_1, false);
 /*---------------------------------------------------------------------------*/
 
 void pre_auton(void) {
-  // All activities that occur before the competition starts
-  // Example: clearing encoders, setting servo positions, ...
+  InertialSensor.calibrate();
+  while (InertialSensor.isCalibrating()) {
+    wait(20, msec);
+  }
+
+  resetDriveEncoders();
+  InertialSensor.resetHeading();
+  InertialSensor.resetRotation();
+  wait(20, msec);
+
+  Controller.Screen.clearScreen();
+  Controller.Screen.setCursor(1, 0);
+  Controller.Screen.print("Initialized");
 }
 
 /*---------------------------------------------------------------------------*/
-/*                                                                           */
 /*                              Autonomous Task                              */
-/*                                                                           */
 /*  This task is used to control your robot during the autonomous phase of   */
 /*  a VEX Competition.                                                       */
-/*                                                                           */
-/*  You must modify the code to add your own robot specific commands here.   */
 /*---------------------------------------------------------------------------*/
 
 void autonomous(void) {
-  // ..........................................................................
-  // Insert autonomous user code here.
-  // ..........................................................................
+  // Deploy intake
+  Intake.spinFor(-300, deg, 600, rpm);
+
+  // Autonomous
+  move(400, 600);
+  Intake.spin(reverse, 600, rpm);
+  move(-100, 600);
 }
 
 /*---------------------------------------------------------------------------*/
-/*                                                                           */
 /*                              User Control Task                            */
-/*                                                                           */
 /*  This task is used to control your robot during the user control phase of */
 /*  a VEX Competition.                                                       */
-/*                                                                           */
-/*  You must modify the code to add your own robot specific commands here.   */
 /*---------------------------------------------------------------------------*/
 
-bool flywheelOnFwd = false;
-bool flywheelOnRev = false;
+void usercontrol(void) {
+  Controller.ButtonR2.pressed(togglePneumatics);
 
-void toggleFlywheelFwd() {
-  if (flywheelOnFwd) {
-    Flywheel.stop();
-  } else {
-    Flywheel.spin(fwd, 15, volt);
+  while (true) {
+    chassis();
+
+    if (Controller.ButtonR1.pressing()) {
+      Flywheel.spin(fwd, 15, volt);
+    } else {
+      Flywheel.stop();
+    }
+
+    if (Controller.ButtonL1.pressing()) {
+      Intake.spin(fwd, 600, rpm);
+    } else if (Controller.ButtonL2.pressing()) {
+      Intake.spin(fwd, -600, rpm);
+    } else {
+      Intake.stop();
+    }
+
+    if (Controller.ButtonUp.pressing()) {
+      Arm.spin(fwd, 100, rpm);
+    } else if (Controller.ButtonDown.pressing()) {
+      Arm.spin(fwd, -100, rpm);
+    } else {
+      Arm.stop();
+    }
+
+    // Sleep the task for a short amount of time to prevent wasted resources
+    wait(20, msec);
   }
-
-  flywheelOnFwd = !flywheelOnFwd;
 }
 
-void toggleFlywheelRev() {
-  if (flywheelOnRev) {
-    Flywheel.stop();
+// Autonomous functions
+void rotateTo(double degrees, double speed, int differenceThreshold) {
+  double rightDeg = 0;
+  double leftDeg = 0;
+  double difference = 0;
+  bool turnLeft = false;
+
+  if (InertialSensor.heading() < degrees) {
+    rightDeg = degrees - InertialSensor.heading();
+    leftDeg = 360 + InertialSensor.heading() - degrees;
   } else {
-    Flywheel.spin(reverse, 7, volt);
+    rightDeg = 360 - (InertialSensor.heading() - degrees);
+    leftDeg = InertialSensor.heading() - degrees;
   }
 
-  flywheelOnRev = !flywheelOnRev;
+  if (rightDeg > leftDeg) {  // Turning left is shorter
+    speed *= -1;
+    difference = leftDeg;
+    turnLeft = true;
+  } else {  // Turning right is shorter
+    difference = rightDeg;
+  }
+
+  if (difference > differenceThreshold) {
+    LeftDrive.spin(forward, speed, pct);
+    RightDrive.spin(reverse, speed, pct);
+
+    while (difference > differenceThreshold) {
+      if (InertialSensor.heading() < degrees) {
+        if (turnLeft) {
+          difference = 360 + InertialSensor.heading() - degrees;
+        } else {
+          difference = degrees - InertialSensor.heading();
+        }
+      } else {
+        if (turnLeft) {
+          difference = InertialSensor.heading() - degrees;
+        } else {
+          difference = 360 - (InertialSensor.heading() - degrees);
+        }
+      }
+      task::sleep(20);
+    }
+  }
+
+  LeftDrive.spin(forward, speed * 0.1, pct);
+  RightDrive.spin(reverse, speed * 0.1, pct);
+
+  int overshootError = 3;
+  if (turnLeft) {
+    waitUntil(degrees + overshootError >= InertialSensor.heading() &&
+              InertialSensor.heading() >= degrees);
+  } else {
+    waitUntil(degrees + overshootError >= InertialSensor.heading() &&
+              InertialSensor.heading() >= (degrees));
+  }
+
+  LeftDrive.stop();
+  RightDrive.stop();
+  wait(20, msec);
 }
 
+void resetDriveEncoders() {
+  FrontLeft.resetPosition();
+  FrontRight.resetPosition();
+  BackLeft.resetPosition();
+  BackRight.resetPosition();
+}
+
+double avgDriveEncoderValue() {
+  return (fabs(FrontLeft.position(deg)) + fabs(FrontRight.position(deg)) +
+          fabs(BackLeft.position(deg)) + fabs(BackRight.position(deg))) /
+         4;
+}
+
+void moveForward(int left, int right) {
+  LeftDrive.spin(fwd, left, dps);
+  RightDrive.spin(fwd, right, dps);
+}
+
+/// @param degrees positive = forward & negative = backward
+void move(int degrees, int degreesPerSecond, bool hold) {
+  int direction = abs(degrees) / degrees;
+
+  resetDriveEncoders();
+  InertialSensor.resetRotation();
+
+  if (hold) {
+    moveForward(
+        degreesPerSecond * direction * 0.5 - InertialSensor.rotation() * 10,
+        degreesPerSecond * direction * 0.5 + InertialSensor.rotation() * 10);
+
+    wait(0.3, sec);
+  }
+
+  while (avgDriveEncoderValue() < abs(degrees)) {
+    moveForward(degreesPerSecond * direction - InertialSensor.rotation() * 10,
+                degreesPerSecond * direction + InertialSensor.rotation() * 10);
+    wait(20, msec);
+  }
+
+  if (hold) {
+    moveForward(-600 * direction, -600 * direction);
+    wait(125, msec);
+
+    moveForward(0, 0);
+    wait(20, msec);
+  }
+}
+
+// Driver functions
 void chassis() {
   int deadZone = 18;
 
@@ -112,21 +255,18 @@ void chassis() {
   }
 }
 
-void usercontrol(void) {
-  Controller.ButtonR1.pressed(toggleFlywheelFwd);
-  Controller.ButtonL1.pressed(toggleFlywheelRev);
-
-  while (true) {
-    chassis();
-
-    // Sleep the task for a short amount of time to prevent wasted resources
-    wait(20, msec);
+void togglePneumatics() {
+  if (pneumaticsOpen) {
+    LeftPneumatics.close();
+    RightPneumatics.close();
+  } else {
+    LeftPneumatics.open();
+    RightPneumatics.open();
   }
+
+  pneumaticsOpen = !pneumaticsOpen;
 }
 
-//
-// Main will set up the competition functions and callbacks.
-//
 int main() {
   // Set up callbacks for autonomous and driver control periods.
   Competition.autonomous(autonomous);
