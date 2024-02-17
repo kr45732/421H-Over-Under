@@ -32,13 +32,15 @@ pneumatics LeftPneumatics = pneumatics(Brain.ThreeWirePort.F);
 pneumatics RightPneumatics = pneumatics(Brain.ThreeWirePort.E);
 
 // Sensors
-inertial InertialSensor = inertial(PORT2);  // check port
+// inertial InertialSensor = inertial(PORT6);  // check port
 
 // Function prototypes
 void rotateTo(double degrees, double speed, int differenceThreshold = 20);
 void move(int degrees, int degreesPerSecond, bool hold = true);
 void chassis();
 void togglePneumatics();
+void resetDriveEncoders();
+double avgDriveEncoderValue();
 
 // Global variables
 bool pneumaticsOpen = false;
@@ -53,15 +55,15 @@ bool pneumaticsOpen = false;
 /*---------------------------------------------------------------------------*/
 
 void pre_auton(void) {
-  InertialSensor.calibrate();
-  while (InertialSensor.isCalibrating()) {
-    wait(20, msec);
-  }
+  // InertialSensor.calibrate();
+  // while (InertialSensor.isCalibrating()) {
+  //   wait(20, msec);
+  // }
 
   resetDriveEncoders();
-  InertialSensor.resetHeading();
-  InertialSensor.resetRotation();
-  wait(20, msec);
+  // InertialSensor.resetHeading();
+  // InertialSensor.resetRotation();
+  // wait(20, msec);
 
   Controller.Screen.clearScreen();
   Controller.Screen.setCursor(1, 0);
@@ -76,12 +78,11 @@ void pre_auton(void) {
 
 void autonomous(void) {
   // Deploy intake
-  Intake.spinFor(-300, deg, 600, rpm);
+  Intake.spinFor(-500, deg, 600, rpm);
 
   // Autonomous
-  move(400, 600);
-  Intake.spin(reverse, 600, rpm);
-  move(-100, 600);
+  move(-1600, 400);
+  move(400, 100);
 }
 
 /*---------------------------------------------------------------------------*/
@@ -130,55 +131,55 @@ void rotateTo(double degrees, double speed, int differenceThreshold) {
   double difference = 0;
   bool turnLeft = false;
 
-  if (InertialSensor.heading() < degrees) {
-    rightDeg = degrees - InertialSensor.heading();
-    leftDeg = 360 + InertialSensor.heading() - degrees;
-  } else {
-    rightDeg = 360 - (InertialSensor.heading() - degrees);
-    leftDeg = InertialSensor.heading() - degrees;
-  }
+  // if (InertialSensor.heading() < degrees) {
+  //   rightDeg = degrees - InertialSensor.heading();
+  //   leftDeg = 360 + InertialSensor.heading() - degrees;
+  // } else {
+  //   rightDeg = 360 - (InertialSensor.heading() - degrees);
+  //   leftDeg = InertialSensor.heading() - degrees;
+  // }
 
-  if (rightDeg > leftDeg) {  // Turning left is shorter
-    speed *= -1;
-    difference = leftDeg;
-    turnLeft = true;
-  } else {  // Turning right is shorter
-    difference = rightDeg;
-  }
+  // if (rightDeg > leftDeg) {  // Turning left is shorter
+  //   speed *= -1;
+  //   difference = leftDeg;
+  //   turnLeft = true;
+  // } else {  // Turning right is shorter
+  //   difference = rightDeg;
+  // }
 
-  if (difference > differenceThreshold) {
-    LeftDrive.spin(forward, speed, pct);
-    RightDrive.spin(reverse, speed, pct);
+  // if (difference > differenceThreshold) {
+  //   LeftDrive.spin(forward, speed, pct);
+  //   RightDrive.spin(reverse, speed, pct);
 
-    while (difference > differenceThreshold) {
-      if (InertialSensor.heading() < degrees) {
-        if (turnLeft) {
-          difference = 360 + InertialSensor.heading() - degrees;
-        } else {
-          difference = degrees - InertialSensor.heading();
-        }
-      } else {
-        if (turnLeft) {
-          difference = InertialSensor.heading() - degrees;
-        } else {
-          difference = 360 - (InertialSensor.heading() - degrees);
-        }
-      }
-      task::sleep(20);
-    }
-  }
+  //   while (difference > differenceThreshold) {
+  //     if (InertialSensor.heading() < degrees) {
+  //       if (turnLeft) {
+  //         difference = 360 + InertialSensor.heading() - degrees;
+  //       } else {
+  //         difference = degrees - InertialSensor.heading();
+  //       }
+  //     } else {
+  //       if (turnLeft) {
+  //         difference = InertialSensor.heading() - degrees;
+  //       } else {
+  //         difference = 360 - (InertialSensor.heading() - degrees);
+  //       }
+  //     }
+  //     task::sleep(20);
+  //   }
+  // }
 
-  LeftDrive.spin(forward, speed * 0.1, pct);
-  RightDrive.spin(reverse, speed * 0.1, pct);
+  // LeftDrive.spin(forward, speed * 0.1, pct);
+  // RightDrive.spin(reverse, speed * 0.1, pct);
 
-  int overshootError = 3;
-  if (turnLeft) {
-    waitUntil(degrees + overshootError >= InertialSensor.heading() &&
-              InertialSensor.heading() >= degrees);
-  } else {
-    waitUntil(degrees + overshootError >= InertialSensor.heading() &&
-              InertialSensor.heading() >= (degrees));
-  }
+  // int overshootError = 3;
+  // if (turnLeft) {
+  //   waitUntil(degrees + overshootError >= InertialSensor.heading() &&
+  //             InertialSensor.heading() >= degrees);
+  // } else {
+  //   waitUntil(degrees + overshootError >= InertialSensor.heading() &&
+  //             InertialSensor.heading() >= (degrees));
+  // }
 
   LeftDrive.stop();
   RightDrive.stop();
@@ -199,8 +200,8 @@ double avgDriveEncoderValue() {
 }
 
 void moveForward(int left, int right) {
-  LeftDrive.spin(fwd, left, dps);
-  RightDrive.spin(fwd, right, dps);
+  LeftDrive.spin(fwd, left, rpm);
+  RightDrive.spin(fwd, right, rpm);
 }
 
 /// @param degrees positive = forward & negative = backward
@@ -208,19 +209,20 @@ void move(int degrees, int degreesPerSecond, bool hold) {
   int direction = abs(degrees) / degrees;
 
   resetDriveEncoders();
-  InertialSensor.resetRotation();
+  // InertialSensor.resetRotation();
 
   if (hold) {
     moveForward(
-        degreesPerSecond * direction * 0.5 - InertialSensor.rotation() * 10,
-        degreesPerSecond * direction * 0.5 + InertialSensor.rotation() * 10);
-
+        degreesPerSecond * direction * 0.5,  //- InertialSensor.rotation() * 10,
+        degreesPerSecond * direction *
+            0.5);  // + InertialSensor.rotation() * 10);
     wait(0.3, sec);
   }
 
   while (avgDriveEncoderValue() < abs(degrees)) {
-    moveForward(degreesPerSecond * direction - InertialSensor.rotation() * 10,
-                degreesPerSecond * direction + InertialSensor.rotation() * 10);
+    moveForward(
+        degreesPerSecond * direction,   // - InertialSensor.rotation() * 10,
+        degreesPerSecond * direction);  // + InertialSensor.rotation() * 10);
     wait(20, msec);
   }
 
